@@ -34,7 +34,7 @@ The greeting.wav file is located inside the CybersecurityChatbotGUI project fold
 It must be set to Copy to Output Directory = Copy Always in Visual Studio properties.
 
 ## YouTube Video
-[Add your YouTube link here]
+https://youtu.be/kbg8yZ0wlAU?si=3wAbUJEYQPrHtKCg
 
 ## GitHub Actions
-[Add screenshot of green tick here]
+
