@@ -37,4 +37,6 @@ It must be set to Copy to Output Directory = Copy Always in Visual Studio proper
 https://youtu.be/kbg8yZ0wlAU?si=3wAbUJEYQPrHtKCg
 
 ## GitHub Actions
+<img width="959" height="448" alt="GIT" src="https://github.com/user-attachments/assets/83982b28-03f1-43ca-9b7d-f3eb3b2a63a6" />
+
 
