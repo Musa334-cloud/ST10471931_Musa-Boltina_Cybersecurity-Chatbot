@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Media;
 using System.Windows;
@@ -11,16 +12,27 @@ namespace CybersecurityChatbotGUI
     public partial class MainWindow : Window
     {
         private ChatBot _chatBot;
+        private ActivityLogger _logger;
+        private TaskManager _taskManager;
+        private QuizManager _quizManager;
+        private string _selectedAnswer = string.Empty;
+        private List<RadioButton> _quizRadioButtons = new List<RadioButton>();
 
         public MainWindow()
         {
             InitializeComponent();
 
-            _chatBot = new ChatBot();
+            _logger = new ActivityLogger();
+            _taskManager = new TaskManager(_logger);
+            _chatBot = new ChatBot(_logger, _taskManager);
+            _quizManager = new QuizManager(_logger);
 
             PlayVoiceGreeting();
             AppendBotMessage(_chatBot.GetGreeting());
+            LoadTaskList();
         }
+
+        // ── Startup ────────────────────────────────────────────────────
 
         private void PlayVoiceGreeting()
         {
@@ -33,11 +45,34 @@ namespace CybersecurityChatbotGUI
                     player.Play();
                 }
             }
-            catch (Exception ex)
-            {
-                StatusBar.Text = "Audio note: " + ex.Message;
-            }
+            catch { }
         }
+
+        // ── Navigation ─────────────────────────────────────────────────
+
+        private void NavChat_Click(object sender, RoutedEventArgs e)
+        {
+            ChatPanel.Visibility = Visibility.Visible;
+            TaskPanel.Visibility = Visibility.Collapsed;
+            QuizPanel.Visibility = Visibility.Collapsed;
+        }
+
+        private void NavTasks_Click(object sender, RoutedEventArgs e)
+        {
+            ChatPanel.Visibility = Visibility.Collapsed;
+            TaskPanel.Visibility = Visibility.Visible;
+            QuizPanel.Visibility = Visibility.Collapsed;
+            LoadTaskList();
+        }
+
+        private void NavQuiz_Click(object sender, RoutedEventArgs e)
+        {
+            ChatPanel.Visibility = Visibility.Collapsed;
+            TaskPanel.Visibility = Visibility.Collapsed;
+            QuizPanel.Visibility = Visibility.Visible;
+        }
+
+        // ── Chat ───────────────────────────────────────────────────────
 
         private void SendButton_Click(object sender, RoutedEventArgs e)
         {
@@ -54,9 +89,7 @@ namespace CybersecurityChatbotGUI
         {
             Button btn = sender as Button;
             if (btn == null) return;
-
-            string topic = btn.Tag.ToString();
-            UserInput.Text = topic;
+            UserInput.Text = btn.Tag.ToString();
             SendMessage();
         }
 
@@ -70,9 +103,24 @@ namespace CybersecurityChatbotGUI
             UserInput.Foreground = Brushes.White;
 
             string response = _chatBot.ProcessInput(input);
-            AppendBotMessage(response);
 
+            // Special response — launch quiz panel
+            if (response == "LAUNCH_QUIZ")
+            {
+                AppendBotMessage("🎮 Launching the Cybersecurity Quiz! Click the Quiz tab on the left.");
+                NavQuiz_Click(null, null);
+                return;
+            }
+
+            AppendBotMessage(response);
             StatusBar.Text = "SecureNet replied • " + DateTime.Now.ToString("HH:mm:ss");
+
+            // If task was added via chat refresh task list
+            if (input.ToLower().Contains("add task") || input.ToLower().Contains("add a task") ||
+                input.ToLower().Contains("remind me") || input.ToLower().Contains("i need to"))
+            {
+                LoadTaskList();
+            }
         }
 
         private void AppendUserMessage(string text)
@@ -104,7 +152,7 @@ namespace CybersecurityChatbotGUI
             bubble.Child = label;
             Grid.SetColumn(bubble, 0);
             container.Children.Add(bubble);
-            ChatPanel.Children.Add(container);
+            ChatMessages.Children.Add(container);
             ScrollToBottom();
         }
 
@@ -119,7 +167,7 @@ namespace CybersecurityChatbotGUI
                 Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0xD4, 0xFF)),
                 Margin = new Thickness(12, 8, 0, 2)
             };
-            ChatPanel.Children.Add(nameLabel);
+            ChatMessages.Children.Add(nameLabel);
 
             var container = new Grid { Margin = new Thickness(8, 0, 60, 4) };
             container.ColumnDefinitions.Add(new ColumnDefinition
@@ -151,7 +199,7 @@ namespace CybersecurityChatbotGUI
             bubble.Child = label;
             Grid.SetColumn(bubble, 0);
             container.Children.Add(bubble);
-            ChatPanel.Children.Add(container);
+            ChatMessages.Children.Add(container);
             ScrollToBottom();
         }
 
@@ -159,6 +207,204 @@ namespace CybersecurityChatbotGUI
         {
             ChatScrollViewer.UpdateLayout();
             ChatScrollViewer.ScrollToEnd();
+        }
+
+        // ── Task Manager ───────────────────────────────────────────────
+
+        private void LoadTaskList()
+        {
+            TaskListBox.Items.Clear();
+            var tasks = _taskManager.GetAllTasks();
+
+            if (tasks.Count == 0)
+            {
+                TaskListBox.Items.Add("No tasks yet. Add one above!");
+                return;
+            }
+
+            foreach (var task in tasks)
+            {
+                string status = task.IsComplete ? "✅" : "⏳";
+                string reminder = !string.IsNullOrWhiteSpace(task.Reminder)
+                    ? " | ⏰ " + task.Reminder : "";
+                string display = status + " [" + task.Id + "] " + task.Title + reminder;
+                if (!string.IsNullOrWhiteSpace(task.Description) && task.Description != "Cybersecurity task: " + task.Title)
+                    display += "\n      " + task.Description;
+                TaskListBox.Items.Add(display);
+            }
+        }
+
+        private void AddTaskButton_Click(object sender, RoutedEventArgs e)
+        {
+            string title = TaskTitleInput.Text.Trim();
+            string desc = TaskDescInput.Text.Trim();
+            string reminder = TaskReminderInput.Text.Trim();
+
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                TaskStatusLabel.Text = "⚠️ Please enter a task title!";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(desc))
+                desc = "Cybersecurity task: " + title;
+
+            _taskManager.AddTask(title, desc, reminder);
+            LoadTaskList();
+
+            TaskTitleInput.Clear();
+            TaskDescInput.Clear();
+            TaskReminderInput.Clear();
+            TaskStatusLabel.Text = "✅ Task added successfully!";
+        }
+
+        private void MarkCompleteButton_Click(object sender, RoutedEventArgs e)
+        {
+            int selectedIndex = TaskListBox.SelectedIndex;
+            if (selectedIndex < 0)
+            {
+                TaskStatusLabel.Text = "⚠️ Please select a task first!";
+                return;
+            }
+
+            var tasks = _taskManager.GetAllTasks();
+            if (selectedIndex < tasks.Count)
+            {
+                _taskManager.MarkAsComplete(tasks[selectedIndex].Id);
+                LoadTaskList();
+                TaskStatusLabel.Text = "✅ Task marked as complete!";
+            }
+        }
+
+        private void DeleteTaskButton_Click(object sender, RoutedEventArgs e)
+        {
+            int selectedIndex = TaskListBox.SelectedIndex;
+            if (selectedIndex < 0)
+            {
+                TaskStatusLabel.Text = "⚠️ Please select a task first!";
+                return;
+            }
+
+            var tasks = _taskManager.GetAllTasks();
+            if (selectedIndex < tasks.Count)
+            {
+                _taskManager.DeleteTask(tasks[selectedIndex].Id);
+                LoadTaskList();
+                TaskStatusLabel.Text = "🗑️ Task deleted!";
+            }
+        }
+
+        // ── Quiz ───────────────────────────────────────────────────────
+
+        private void StartQuizButton_Click(object sender, RoutedEventArgs e)
+        {
+            _quizManager.ResetQuiz();
+            _logger.Log("Quiz started by user");
+
+            QuizStartScreen.Visibility = Visibility.Collapsed;
+            QuizResultsScreen.Visibility = Visibility.Collapsed;
+            QuizQuestionScreen.Visibility = Visibility.Visible;
+            FeedbackBorder.Visibility = Visibility.Collapsed;
+
+            ShowCurrentQuestion();
+        }
+
+        private void ShowCurrentQuestion()
+        {
+            var question = _quizManager.GetCurrentQuestion();
+            if (question == null) return;
+
+            QuizQuestionText.Text = "Q" + _quizManager.GetCurrentQuestionNumber() +
+                                    ": " + question.Question;
+
+            QuizProgressLabel.Text = "Question " + _quizManager.GetCurrentQuestionNumber() +
+                                     " of " + _quizManager.GetTotalQuestions();
+
+            QuizScoreLabel.Text = "Score: " + _quizManager.GetCurrentScore();
+            QuizStatusBar.Text = "Select your answer and click Submit";
+
+            QuizOptionsPanel.Children.Clear();
+            _quizRadioButtons.Clear();
+            _selectedAnswer = string.Empty;
+
+            foreach (string option in question.Options)
+            {
+                var rb = new RadioButton
+                {
+                    Content = option,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0xE6, 0xED, 0xF3)),
+                    FontFamily = new FontFamily("Segoe UI"),
+                    FontSize = 14,
+                    Margin = new Thickness(0, 6, 0, 6),
+                    GroupName = "QuizOptions",
+                    Cursor = Cursors.Hand
+                };
+
+                string optionCopy = option;
+                rb.Checked += (s, ev) =>
+                {
+                    if (question.IsTrueFalse)
+                        _selectedAnswer = optionCopy;
+                    else
+                        _selectedAnswer = optionCopy.Substring(0, 1);
+                };
+
+                _quizRadioButtons.Add(rb);
+                QuizOptionsPanel.Children.Add(rb);
+            }
+
+            FeedbackBorder.Visibility = Visibility.Collapsed;
+            SubmitAnswerButton.Visibility = Visibility.Visible;
+        }
+
+        private void SubmitAnswerButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(_selectedAnswer))
+            {
+                QuizStatusBar.Text = "⚠️ Please select an answer first!";
+                return;
+            }
+
+            bool correct = _quizManager.SubmitAnswer(_selectedAnswer);
+            string feedback = _quizManager.GetFeedback();
+
+            FeedbackText.Text = correct
+                ? "✅ " + feedback
+                : "❌ Incorrect. " + feedback;
+
+            FeedbackBorder.Background = new SolidColorBrush(
+                correct
+                ? Color.FromRgb(0x1A, 0x3A, 0x1A)
+                : Color.FromRgb(0x3A, 0x1A, 0x1A));
+
+            FeedbackBorder.Visibility = Visibility.Visible;
+            SubmitAnswerButton.Visibility = Visibility.Collapsed;
+            QuizScoreLabel.Text = "Score: " + _quizManager.GetCurrentScore();
+
+            if (_quizManager.IsFinished())
+            {
+                NextQuestionButton.Content = "See Results 🏆";
+                _logger.Log("Quiz completed — score: " + _quizManager.GetFinalScore());
+            }
+            else
+            {
+                NextQuestionButton.Content = "Next Question ➤";
+            }
+        }
+
+        private void NextQuestionButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_quizManager.IsFinished())
+            {
+                QuizQuestionScreen.Visibility = Visibility.Collapsed;
+                QuizResultsScreen.Visibility = Visibility.Visible;
+                QuizFinalMessage.Text = _quizManager.GetFinalMessage();
+                QuizStatusBar.Text = "Quiz complete!";
+            }
+            else
+            {
+                ShowCurrentQuestion();
+            }
         }
     }
 }
